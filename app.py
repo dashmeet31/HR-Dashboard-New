@@ -1,7 +1,8 @@
 from flask import Flask, render_template, request, redirect, session, send_from_directory, send_file
-import sqlite3
 import os
 import pandas as pd
+import psycopg2
+from urllib.parse import urlparse
 
 # =========================
 # BASIC APP CONFIG
@@ -10,19 +11,68 @@ app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "fallback-secret-key")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DB_PATH = os.path.join(BASE_DIR, "hr_management.db")
 
 UPLOAD_FOLDER = os.path.join(BASE_DIR, "uploads", "resumes")
 app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
 os.makedirs(app.config["UPLOAD_FOLDER"], exist_ok=True)
 
 # =========================
-# DATABASE CONNECTION
+# DATABASE CONNECTION (PostgreSQL)
 # =========================
 def get_db():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
+    db_url = os.environ.get("DATABASE_URL")
+    if not db_url:
+        raise Exception("DATABASE_URL not set")
+
+    result = urlparse(db_url)
+
+    conn = psycopg2.connect(
+        dbname=result.path[1:],
+        user=result.username,
+        password=result.password,
+        host=result.hostname,
+        port=result.port,
+        sslmode="require"
+    )
     return conn
+
+
+# =========================
+# INIT DATABASE (CREATE TABLES)
+# =========================
+def init_db():
+    conn = get_db()
+    cur = conn.cursor()
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS jobs (
+        id SERIAL PRIMARY KEY,
+        title TEXT,
+        description TEXT,
+        location TEXT,
+        job_type TEXT
+    )
+    """)
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS applications (
+        id SERIAL PRIMARY KEY,
+        job_id INTEGER REFERENCES jobs(id),
+        applicant_name TEXT,
+        email TEXT,
+        phone TEXT,
+        resume_path TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """)
+
+    conn.commit()
+    conn.close()
+
+
+# 👉 VERY IMPORTANT: init DB on startup
+with app.app_context():
+    init_db()
 
 # =========================
 # AUTH / LOGIN
@@ -35,6 +85,7 @@ def login():
 
         # TEMP ADMIN (DEPLOY SAFE)
         if email == "admin@hr.com" and password == "admin123":
+            session.clear()
             session["user"] = email
             session["hr_logged_in"] = True
             return redirect("/dashboard")
@@ -61,8 +112,13 @@ def dashboard():
     db = get_db()
     cur = db.cursor()
 
-    total_jobs = cur.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
-    total_applications = cur.execute("SELECT COUNT(*) FROM applications").fetchone()[0]
+    cur.execute("SELECT COUNT(*) FROM jobs")
+    total_jobs = cur.fetchone()[0]
+
+    cur.execute("SELECT COUNT(*) FROM applications")
+    total_applications = cur.fetchone()[0]
+
+    db.close()
 
     return render_template(
         "dashboard.html",
@@ -93,18 +149,21 @@ def jobs():
     cur = db.cursor()
 
     if request.method == "POST":
-        title = request.form.get("title")
-        description = request.form.get("description")
-        location = request.form.get("location")
-        job_type = request.form.get("job_type")
-
         cur.execute(
-            "INSERT INTO jobs (title, description, location, job_type) VALUES (?, ?, ?, ?)",
-            (title, description, location, job_type)
+            "INSERT INTO jobs (title, description, location, job_type) VALUES (%s, %s, %s, %s)",
+            (
+                request.form.get("title"),
+                request.form.get("description"),
+                request.form.get("location"),
+                request.form.get("job_type")
+            )
         )
         db.commit()
 
-    jobs = cur.execute("SELECT * FROM jobs").fetchall()
+    cur.execute("SELECT * FROM jobs ORDER BY id DESC")
+    jobs = cur.fetchall()
+    db.close()
+
     return render_template("jobs.html", jobs=jobs)
 
 
@@ -114,8 +173,11 @@ def delete_job(id):
         return redirect("/")
 
     db = get_db()
-    db.execute("DELETE FROM jobs WHERE id=?", (id,))
+    cur = db.cursor()
+    cur.execute("DELETE FROM jobs WHERE id=%s", (id,))
     db.commit()
+    db.close()
+
     return redirect("/jobs")
 
 
@@ -130,8 +192,8 @@ def edit_job(id):
     if request.method == "POST":
         cur.execute("""
             UPDATE jobs
-            SET title=?, description=?, location=?, job_type=?
-            WHERE id=?
+            SET title=%s, description=%s, location=%s, job_type=%s
+            WHERE id=%s
         """, (
             request.form.get("title"),
             request.form.get("description"),
@@ -140,9 +202,13 @@ def edit_job(id):
             id
         ))
         db.commit()
+        db.close()
         return redirect("/jobs")
 
-    job = cur.execute("SELECT * FROM jobs WHERE id=?", (id,)).fetchone()
+    cur.execute("SELECT * FROM jobs WHERE id=%s", (id,))
+    job = cur.fetchone()
+    db.close()
+
     return render_template("edit_job.html", job=job)
 
 
@@ -154,18 +220,17 @@ def apply(job_id):
     db = get_db()
     cur = db.cursor()
 
-    job = cur.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
+    cur.execute("SELECT * FROM jobs WHERE id=%s", (job_id,))
+    job = cur.fetchone()
 
     if not job:
+        db.close()
         return "Job not found", 404
 
     if request.method == "POST":
-        name = request.form.get("name")
-        email = request.form.get("email")
-        phone = request.form.get("phone")
         resume = request.files.get("resume")
 
-        if not all([name, email, phone, resume]):
+        if not resume:
             return "Invalid data", 400
 
         filename = resume.filename
@@ -174,26 +239,21 @@ def apply(job_id):
         cur.execute("""
             INSERT INTO applications
             (job_id, applicant_name, email, phone, resume_path)
-            VALUES (?, ?, ?, ?, ?)
-        """, (job_id, name, email, phone, filename))
+            VALUES (%s, %s, %s, %s, %s)
+        """, (
+            job_id,
+            request.form.get("name"),
+            request.form.get("email"),
+            request.form.get("phone"),
+            filename
+        ))
 
         db.commit()
+        db.close()
         return "Application submitted successfully!"
 
+    db.close()
     return render_template("apply.html", job=job)
-
-
-# =========================
-# VIEW / DOWNLOAD RESUME
-# =========================
-@app.route("/resume/<path:filename>")
-def view_resume(filename):
-    return send_from_directory(app.config["UPLOAD_FOLDER"], filename)
-
-
-@app.route("/download/<path:filename>")
-def download_resume(filename):
-    return send_from_directory(app.config["UPLOAD_FOLDER"], filename, as_attachment=True)
 
 
 # =========================
@@ -207,14 +267,18 @@ def applications():
     db = get_db()
     cur = db.cursor()
 
-    jobs = cur.execute("SELECT id, title FROM jobs").fetchall()
-    applications = cur.execute("""
+    cur.execute("""
         SELECT applications.*, jobs.title AS job_title
         FROM applications
         JOIN jobs ON applications.job_id = jobs.id
         ORDER BY applications.id DESC
-    """).fetchall()
+    """)
+    applications = cur.fetchall()
 
+    cur.execute("SELECT id, title FROM jobs")
+    jobs = cur.fetchall()
+
+    db.close()
     return render_template("applications.html", applications=applications, jobs=jobs)
 
 
@@ -224,7 +288,7 @@ def export_applications():
         return redirect("/")
 
     db = get_db()
-    df = pd.read_sql_query("""
+    df = pd.read_sql("""
         SELECT jobs.title AS Job,
                applications.applicant_name AS Name,
                applications.email AS Email,
@@ -235,8 +299,6 @@ def export_applications():
 
     file_path = os.path.join(BASE_DIR, "applications.xlsx")
     df.to_excel(file_path, index=False)
+    db.close()
 
     return send_file(file_path, as_attachment=True)
-
-if __name__ == "__main__":
-    app.run(debug=True)
