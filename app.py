@@ -101,8 +101,10 @@ with app.app_context():
 def view_resume(filename):
     return send_from_directory(
         app.config["UPLOAD_FOLDER"],
-        filename
+        filename,
+        as_attachment=False   # browser decide kare open/download
     )
+
 
 @app.route("/", methods=["GET", "POST"])
 def login():
@@ -244,7 +246,7 @@ def apply(job_id):
         resume = request.files.get("resume")
         filename = resume.filename
         resume.save(os.path.join(app.config["UPLOAD_FOLDER"], filename))
-
+        resume_path = filename
         cur.execute("""
             INSERT INTO applications
             (job_id, applicant_name, email, phone, resume_path)

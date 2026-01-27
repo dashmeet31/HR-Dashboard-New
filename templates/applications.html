@@ -77,9 +77,10 @@
                 <td>{{ app["email"] }}</td>
                 <td>{{ app["phone"] }}</td>
                 <td>
-                    <a href="/resume/{{ app['resume_path'] }}" target="_blank">
-                        View Resume
-                    </a>
+                    <a href="/resume/{{ app['resume_path'] }}" target="_blank" rel="noopener">
+                   Open Resume
+                        </a>
+
                 </td>
             </tr>
             {% else %}

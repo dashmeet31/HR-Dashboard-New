@@ -6,12 +6,99 @@
 
     <!-- MAIN CSS -->
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+
+    <!-- ================= GLOBAL UX / FLOW CSS ================= -->
+    <style>
+
+        /* Smooth scrolling everywhere */
+        * {
+            scroll-behavior: smooth;
+        }
+
+        /* ================= CARD FLOW ================= */
+        .card {
+            transition: transform 0.35s ease, box-shadow 0.35s ease;
+        }
+
+        .card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 12px 35px rgba(255,255,255,0.12);
+        }
+
+        /* ================= TABLE ROW HIGHLIGHT ================= */
+        table tbody tr {
+            transition: background 0.25s ease, transform 0.25s ease;
+        }
+
+        table tbody tr:hover {
+            background: rgba(255,255,255,0.06);
+            transform: scale(1.01);
+        }
+
+        /* ================= INPUT / SELECT FLOW ================= */
+        input, textarea, select {
+            transition: border 0.3s ease, box-shadow 0.3s ease, transform 0.2s ease;
+        }
+
+        input:focus,
+        textarea:focus,
+        select:focus {
+            outline: none;
+            border: 1px solid #60a5fa;
+            box-shadow: 0 0 0 3px rgba(96,165,250,0.25);
+            transform: translateY(-1px);
+        }
+
+        /* ================= BUTTON FLOAT ================= */
+        button {
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(255,255,255,0.15);
+        }
+
+        /* ================= SIDEBAR FLOW ================= */
+        .sidebar-nav a {
+            transition: background 0.3s ease, padding-left 0.3s ease;
+        }
+
+        .sidebar-nav a:hover {
+            background: rgba(255,255,255,0.08);
+            padding-left: 18px;
+        }
+
+        .sidebar-nav a.active {
+            background: linear-gradient(135deg, #3b82f6, #6366f1);
+            color: #fff;
+            border-radius: 8px;
+        }
+
+        /* ================= FADE-IN ON LOAD ================= */
+        .main-content {
+            animation: fadeUp 0.6s ease;
+        }
+
+        @keyframes fadeUp {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+    </style>
 </head>
+
 <body>
 
 <div class="app-container">
 
-    <!-- ================= SIDEBAR (FIXED) ================= -->
+    <!-- ================= SIDEBAR ================= -->
     <aside class="sidebar">
 
         <!-- LOGO -->
@@ -24,15 +111,15 @@
         <!-- NAVIGATION -->
         <nav class="sidebar-nav">
             <a href="/dashboard" class="{% if request.path == '/dashboard' %}active{% endif %}">
-                 Home
+                Home
             </a>
 
             <a href="/jobs" class="{% if request.path.startswith('/jobs') %}active{% endif %}">
-                 Manage Jobs
+                Manage Jobs
             </a>
 
             <a href="/applications" class="{% if request.path.startswith('/applications') %}active{% endif %}">
-                 View Applications
+                View Applications
             </a>
 
             <a href="/settings" class="{% if request.path.startswith('/settings') %}active{% endif %}">
