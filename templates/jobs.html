@@ -1,45 +1,27 @@
 {% extends "base.html" %}
-
 {% block content %}
 
 <h1 class="page-title">Manage Jobs</h1>
-
-<p class="subtitle">
-    Create and manage open positions
-</p>
+<p class="subtitle">Create and manage open positions</p>
 
 <div style="display:grid; grid-template-columns: 1fr 2fr; gap:30px;">
 
-    <!-- ADD JOB DROPDOWN -->
+    <!-- ADD JOB -->
     <div class="card">
-
-        <!-- HEADER -->
         <div class="add-job-header" onclick="toggleAddJob()">
             <h3 style="margin:0;">➕ Add New Job</h3>
             <span id="addJobIcon">▼</span>
         </div>
 
-        <!-- BODY (HIDDEN) -->
         <div id="addJobBody" class="add-job-body">
-            <form method="POST" style="margin-top:20px;">
+            <form method="POST">
                 <input type="text" name="title" placeholder="Job Title" required>
                 <textarea name="description" placeholder="Job Description" required></textarea>
                 <input type="text" name="location" placeholder="Location" required>
-                <input type="text" name="job_type" placeholder="Job Type (Intern / Full-time)" required>
-                <input type="text"
-       value="Date Posted: {{ today }}"
-       readonly
-       class="readonly-date">
-
-                <!-- NOTE:
-                     Job Date user se nahi lenge
-                     Backend me auto set hogi (CURRENT_DATE)
-                -->
-
+                <input type="text" name="job_type" placeholder="Job Type" required>
                 <button type="submit">Add Job</button>
             </form>
         </div>
-
     </div>
 
     <!-- JOBS TABLE -->
@@ -52,7 +34,7 @@
                     <th>Title</th>
                     <th>Location</th>
                     <th>Type</th>
-                    <th>Date Posted</th>
+                    <th>Date</th>
                     <th>Actions</th>
                 </tr>
             </thead>
@@ -60,129 +42,32 @@
             <tbody>
             {% for job in jobs %}
                 <tr>
-                    <td>{{ job["title"] }}</td>
-                    <td>{{ job["location"] }}</td>
-                    <td>{{ job["job_type"] }}</td>
+                    <td>{{ job.title }}</td>
+                    <td>{{ job.location }}</td>
+                    <td>{{ job.job_type }}</td>
+                    <td>{{ job.posted_at }}</td>
                     <td>
-                        {% if job["posted_at"] %}
-                            {{ job["posted_at"] }}
-                        {% else %}
-                            —
-                        {% endif %}
-                    </td>
-                    <td>
-                        <a href="/apply/{{ job['id'] }}">Apply</a> |
-                        <a href="/edit-job/{{ job['id'] }}">Edit</a> |
-                        <a href="/delete-job/{{ job['id'] }}">Delete</a>
+                        <a href="/apply/{{ job.id }}">Apply</a> |
+                        <a href="/edit-job/{{ job.id }}">Edit</a> |
+                        <a href="/delete-job/{{ job.id }}">Delete</a>
                     </td>
                 </tr>
             {% else %}
                 <tr>
-                    <td colspan="5" style="text-align:center;color:#94a3b8;">
-                        No jobs found
-                    </td>
+                    <td colspan="5" style="text-align:center;">No jobs found</td>
                 </tr>
             {% endfor %}
             </tbody>
         </table>
     </div>
-
 </div>
 
-<!-- ================= JS ================= -->
 <script>
 function toggleAddJob() {
-    const body = document.getElementById("addJobBody");
-    const icon = document.getElementById("addJobIcon");
-
-    body.classList.toggle("open");
-
-    if (body.classList.contains("open")) {
-        icon.innerText = "▲";
-    } else {
-        icon.innerText = "▼";
-    }
+    document.getElementById("addJobBody").classList.toggle("open");
+    document.getElementById("addJobIcon").innerText =
+        document.getElementById("addJobBody").classList.contains("open") ? "▲" : "▼";
 }
 </script>
-
-<!-- ================= CSS ================= -->
-<style>
-
-/* ---------- Add Job Dropdown ---------- */
-.add-job-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    cursor: pointer;
-    padding: 12px;
-    border-radius: 8px;
-    background: rgba(255, 255, 255, 0.05);
-    transition: background 0.3s ease;
-}
-
-.add-job-header:hover {
-    background: rgba(255, 255, 255, 0.1);
-}
-
-.add-job-body {
-    max-height: 0;
-    overflow: hidden;
-    opacity: 0;
-    transition: max-height 0.4s ease, opacity 0.3s ease;
-}
-
-.add-job-body.open {
-    max-height: 500px;
-    opacity: 1;
-    margin-top: 10px;
-}
-
-/* ---------- Card Hover ---------- */
-.card {
-    transition: transform 0.3s ease, box-shadow 0.3s ease;
-}
-
-.card:hover {
-    transform: translateY(-3px);
-    box-shadow: 0 10px 30px rgba(255, 255, 255, 0.12);
-}
-
-/* ---------- Table Row Hover ---------- */
-table tbody tr {
-    transition: background 0.3s ease;
-}
-
-table tbody tr:hover {
-    background: rgba(255, 255, 255, 0.06);
-}
-
-/* ---------- Input & Textarea Focus ---------- */
-input, textarea {
-    transition: border 0.3s ease, box-shadow 0.3s ease;
-}
-
-input:focus, textarea:focus {
-    outline: none;
-    border: 1px solid #60a5fa;
-    box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.25);
-}
-
-/* ---------- Button Hover ---------- */
-button {
-    transition: transform 0.2s ease, box-shadow 0.2s ease;
-}
-
-button:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 6px 20px rgba(255, 255, 255, 0.15);
-}
-
-.readonly-date {
-    opacity: 0.7;
-    cursor: not-allowed;
-    background: rgba(255, 255, 255, 0.05);
-}
-
-</style>
 
 {% endblock %}

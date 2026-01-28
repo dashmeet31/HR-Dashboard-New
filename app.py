@@ -1,10 +1,11 @@
 from flask import Flask, render_template, request, redirect, session, send_file
-from werkzeug.security import generate_password_hash, check_password_hash
+from functools import wraps
 import os
 import pandas as pd
 from datetime import datetime
 import psycopg2
 import psycopg2.extras
+from psycopg2 import pool
 from urllib.parse import urlparse
 
 # =========================
@@ -14,37 +15,49 @@ app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY", "fallback-secret")
 
 # =========================
-# DATABASE CONNECTION (SUPABASE POOLER)
+# DB CONNECTION POOL (SPEED FIX)
 # =========================
+DATABASE_URL = os.getenv("DATABASE_URL")
+
+db_pool = pool.SimpleConnectionPool(
+    minconn=1,
+    maxconn=5,
+    dsn=DATABASE_URL,
+    sslmode="require"
+)
+
 def get_db(dict_cursor=False):
-    db_url = os.getenv("DATABASE_URL")
-    if not db_url:
-        raise Exception("DATABASE_URL not set")
+    conn = db_pool.getconn()
+    if dict_cursor:
+        conn.cursor_factory = psycopg2.extras.RealDictCursor
+    return conn
 
-    result = urlparse(db_url)
-
-    return psycopg2.connect(
-        dbname=result.path[1:],
-        user=result.username,
-        password=result.password,
-        host=result.hostname,
-        port=result.port,
-        sslmode="require",
-        cursor_factory=psycopg2.extras.RealDictCursor if dict_cursor else None
-    )
+def release_db(conn):
+    db_pool.putconn(conn)
 
 # =========================
-# INIT DATABASE (SAFE)
+# LOGIN REQUIRED DECORATOR
+# =========================
+def login_required(f):
+    @wraps(f)
+    def wrap(*args, **kwargs):
+        if not session.get("hr_logged_in"):
+            return redirect("/")
+        return f(*args, **kwargs)
+    return wrap
+
+# =========================
+# INIT DB
 # =========================
 def init_db():
-    db = get_db()
-    cur = db.cursor()
+    conn = get_db()
+    cur = conn.cursor()
 
     cur.execute("""
         CREATE TABLE IF NOT EXISTS admins (
             id SERIAL PRIMARY KEY,
-            email TEXT UNIQUE NOT NULL,
-            password TEXT NOT NULL
+            email TEXT UNIQUE,
+            password TEXT
         )
     """)
 
@@ -71,15 +84,14 @@ def init_db():
         )
     """)
 
-    # Default admin (PLAIN PASSWORD – stable for now)
     cur.execute("""
         INSERT INTO admins (email, password)
         VALUES (%s, %s)
         ON CONFLICT (email) DO NOTHING
     """, ("admin@hr.com", "admin123"))
 
-    db.commit()
-    db.close()
+    conn.commit()
+    release_db(conn)
 
 with app.app_context():
     init_db()
@@ -90,14 +102,14 @@ with app.app_context():
 @app.route("/", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
-        email = request.form.get("email")
-        password = request.form.get("password")
+        email = request.form["email"]
+        password = request.form["password"]
 
-        db = get_db(dict_cursor=True)
-        cur = db.cursor()
+        conn = get_db(True)
+        cur = conn.cursor()
         cur.execute("SELECT * FROM admins WHERE email=%s", (email,))
         admin = cur.fetchone()
-        db.close()
+        release_db(conn)
 
         if admin and admin["password"] == password:
             session.clear()
@@ -105,7 +117,7 @@ def login():
             session["admin_email"] = email
             return redirect("/dashboard")
 
-        return "Invalid login", 401
+        return "Invalid Login", 401
 
     return render_template("login.html")
 
@@ -118,17 +130,15 @@ def logout():
 # DASHBOARD
 # =========================
 @app.route("/dashboard")
+@login_required
 def dashboard():
-    if not session.get("hr_logged_in"):
-        return redirect("/")
-
-    db = get_db()
-    cur = db.cursor()
+    conn = get_db()
+    cur = conn.cursor()
     cur.execute("SELECT COUNT(*) FROM jobs")
     total_jobs = cur.fetchone()[0]
     cur.execute("SELECT COUNT(*) FROM applications")
     total_applications = cur.fetchone()[0]
-    db.close()
+    release_db(conn)
 
     return render_template(
         "dashboard.html",
@@ -137,93 +147,122 @@ def dashboard():
     )
 
 # =========================
-# JOBS
+# MANAGE JOBS
 # =========================
-@app.route("/jobs", methods=["GET", "POST"])
-def jobs():
-    if not session.get("hr_logged_in"):
-        return redirect("/")
-
-    db = get_db(dict_cursor=True)
-    cur = db.cursor()
+@app.route("/manage-jobs", methods=["GET", "POST"])
+@login_required
+def manage_jobs():
+    conn = get_db(True)
+    cur = conn.cursor()
 
     if request.method == "POST":
         cur.execute("""
             INSERT INTO jobs (title, description, location, job_type)
             VALUES (%s, %s, %s, %s)
         """, (
-            request.form.get("title"),
-            request.form.get("description"),
-            request.form.get("location"),
-            request.form.get("job_type")
+            request.form["title"],
+            request.form["description"],
+            request.form["location"],
+            request.form["job_type"]
         ))
-        db.commit()
+        conn.commit()
 
     cur.execute("SELECT * FROM jobs ORDER BY id DESC")
     jobs = cur.fetchall()
-    db.close()
+    release_db(conn)
 
     return render_template("jobs.html", jobs=jobs)
 
-@app.route("/delete-job/<int:id>")
-def delete_job(id):
-    if not session.get("hr_logged_in"):
-        return redirect("/")
-
-    db = get_db()
-    cur = db.cursor()
-    cur.execute("DELETE FROM jobs WHERE id=%s", (id,))
-    db.commit()
-    db.close()
-    return redirect("/jobs")
+@app.route("/delete-job/<int:job_id>")
+@login_required
+def delete_job(job_id):
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM jobs WHERE id=%s", (job_id,))
+    conn.commit()
+    release_db(conn)
+    return redirect("/manage-jobs")
 
 # =========================
-# APPLY JOB (NO CLOUDINARY / NO SUPABASE SDK)
+# EDIT / UPDATE JOB
+# =========================
+@app.route("/edit-job/<int:job_id>")
+@login_required
+def edit_job(job_id):
+    conn = get_db(True)
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM jobs WHERE id=%s", (job_id,))
+    job = cur.fetchone()
+    release_db(conn)
+
+    if not job:
+        return "Job not found", 404
+
+    return render_template("edit_job.html", job=job)
+
+@app.route("/update-job/<int:job_id>", methods=["POST"])
+@login_required
+def update_job(job_id):
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("""
+        UPDATE jobs
+        SET title=%s, description=%s, location=%s, job_type=%s
+        WHERE id=%s
+    """, (
+        request.form["title"],
+        request.form["description"],
+        request.form["location"],
+        request.form["job_type"],
+        job_id
+    ))
+    conn.commit()
+    release_db(conn)
+    return redirect("/manage-jobs")
+
+# =========================
+# APPLY JOB
 # =========================
 @app.route("/apply/<int:job_id>", methods=["GET", "POST"])
 def apply(job_id):
-    db = get_db(dict_cursor=True)
-    cur = db.cursor()
-
+    conn = get_db(True)
+    cur = conn.cursor()
     cur.execute("SELECT * FROM jobs WHERE id=%s", (job_id,))
     job = cur.fetchone()
 
     if not job:
-        db.close()
+        release_db(conn)
         return "Job not found", 404
 
     if request.method == "POST":
         resume = request.files.get("resume")
-        resume_url = resume.filename if resume else None
+        resume_url = resume.filename if resume else ""
 
         cur.execute("""
             INSERT INTO applications (job_id, applicant_name, email, phone, resume_url)
             VALUES (%s, %s, %s, %s, %s)
         """, (
             job_id,
-            request.form.get("name"),
-            request.form.get("email"),
-            request.form.get("phone"),
+            request.form["name"],
+            request.form["email"],
+            request.form["phone"],
             resume_url
         ))
-
-        db.commit()
-        db.close()
+        conn.commit()
+        release_db(conn)
         return "Application submitted successfully!"
 
-    db.close()
+    release_db(conn)
     return render_template("apply.html", job=job)
 
 # =========================
 # APPLICATIONS
 # =========================
 @app.route("/applications")
+@login_required
 def applications():
-    if not session.get("hr_logged_in"):
-        return redirect("/")
-
-    db = get_db(dict_cursor=True)
-    cur = db.cursor()
+    conn = get_db(True)
+    cur = conn.cursor()
 
     cur.execute("""
         SELECT applications.*, jobs.title AS job_title
@@ -233,35 +272,34 @@ def applications():
     """)
     applications = cur.fetchall()
 
-    cur.execute("SELECT id, title FROM jobs")
-    jobs = cur.fetchall()
+    release_db(conn)
 
-    db.close()
-
-    return render_template(
-        "applications.html",
-        applications=applications,
-        jobs=jobs,
-        selected_job=None
-    )
+    return render_template("applications.html", applications=applications)
 
 # =========================
-# EXPORT
+# DOWNLOAD ALL EXCEL
 # =========================
-@app.route("/export-applications/<int:job_id>")
-def export_filtered_applications(job_id):
-    if not session.get("hr_logged_in"):
-        return redirect("/")
-
-    db = get_db()
+@app.route("/download-excel")
+@login_required
+def download_excel():
+    conn = get_db()
     df = pd.read_sql("""
-        SELECT applicant_name, email, phone
-        FROM applications
-        WHERE job_id = %s
-    """, db, params=(job_id,))
+        SELECT j.title, a.applicant_name, a.email, a.phone, a.created_at
+        FROM applications a
+        JOIN jobs j ON a.job_id = j.id
+    """, conn)
+    release_db(conn)
 
     file_path = "applications.xlsx"
     df.to_excel(file_path, index=False)
-    db.close()
 
     return send_file(file_path, as_attachment=True)
+
+# =========================
+# SETTINGS
+# =========================
+@app.route("/settings", methods=["GET", "POST"])
+@login_required
+def settings():
+    ...
+    return render_template("settings.html")

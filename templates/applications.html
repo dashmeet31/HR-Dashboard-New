@@ -1,63 +1,22 @@
 {% extends "base.html" %}
-
 {% block content %}
 
 <h1 class="page-title">Job Applications</h1>
+<p class="subtitle">Review and manage candidate applications</p>
 
-<p class="subtitle">
-    Review and manage candidate applications
-</p>
-
-<!-- ================= TOP ACTION BAR ================= -->
 <div class="action-bar">
+    <input type="text"
+           id="searchInput"
+           placeholder="Search applications..."
+           onkeyup="searchApplications()"
+           class="search-input">
 
-    <!-- LEFT : SEARCH + JOB FILTER -->
-    <div style="display:flex; gap:15px; align-items:center;">
-
-        <!-- SEARCH BAR -->
-        <input type="text"
-               id="searchInput"
-               placeholder="Search by name, email, phone, job..."
-               onkeyup="searchApplications()"
-               class="search-input">
-
-        <!-- JOB FILTER -->
-        <form method="get" class="filter-form">
-            <select name="job_id" onchange="this.form.submit()">
-                <option value="">All Jobs</option>
-
-                {% for job in jobs %}
-                    <option value="{{ job['id'] }}"
-                        {% if selected_job and job['id']|string == selected_job %}
-                            selected
-                        {% endif %}
-                    >
-                        {{ job['title'] }}
-                    </option>
-                {% endfor %}
-            </select>
-        </form>
-
-    </div>
-
-    <!-- RIGHT : DOWNLOAD BUTTONS -->
-    <div class="download-buttons">
-        <a href="/export-applications">
-            <button type="button">Download All Excel</button>
-        </a>
-
-        {% if selected_job %}
-            <a href="/export-applications/{{ selected_job }}">
-                <button type="button">Download Filtered Excel</button>
-            </a>
-        {% endif %}
-    </div>
-
+    <a href="/download-excel">
+        <button>Download Excel</button>
+    </a>
 </div>
 
-<!-- ================= APPLICATIONS TABLE ================= -->
 <div class="card">
-
     <table id="applicationsTable">
         <thead>
             <tr>
@@ -70,98 +29,36 @@
         </thead>
 
         <tbody>
-            {% for app in applications %}
+        {% for app in applications %}
             <tr>
-                <td>{{ app["job_title"] }}</td>
-                <td>{{ app["applicant_name"] }}</td>
-                <td>{{ app["email"] }}</td>
-                <td>{{ app["phone"] }}</td>
+                <td>{{ app.job_title }}</td>
+                <td>{{ app.applicant_name }}</td>
+                <td>{{ app.email }}</td>
+                <td>{{ app.phone }}</td>
                 <td>
-                    {% if app["resume_url"] %}
-                        <a href="{{ app['resume_url'] }}"
-                           target="_blank"
-                           rel="noopener">
-                            Open Resume
-                        </a>
+                    {% if app.resume_url %}
+                        <a href="{{ app.resume_url }}" target="_blank">Open Resume</a>
                     {% else %}
-                        <span style="color:#94a3b8;">No Resume</span>
+                        No Resume
                     {% endif %}
                 </td>
             </tr>
-            {% else %}
+        {% else %}
             <tr>
-                <td colspan="5" style="text-align:center; color:#94a3b8;">
-                    No applications found
-                </td>
+                <td colspan="5" style="text-align:center;">No applications</td>
             </tr>
-            {% endfor %}
+        {% endfor %}
         </tbody>
     </table>
-
 </div>
 
-<!-- ================= SEARCH JS ================= -->
 <script>
 function searchApplications() {
     const input = document.getElementById("searchInput").value.toLowerCase();
-    const rows = document.querySelectorAll("#applicationsTable tbody tr");
-
-    rows.forEach(row => {
-        const text = row.innerText.toLowerCase();
-        row.style.display = text.includes(input) ? "" : "none";
+    document.querySelectorAll("#applicationsTable tbody tr").forEach(row => {
+        row.style.display = row.innerText.toLowerCase().includes(input) ? "" : "none";
     });
 }
 </script>
-
-<!-- ================= PAGE CSS ================= -->
-<style>
-/* Action bar layout */
-.action-bar {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 25px;
-    gap: 20px;
-}
-
-/* Search input */
-.search-input {
-    padding: 8px 12px;
-    width: 260px;
-    border-radius: 8px;
-}
-
-/* Filter form */
-.filter-form select {
-    padding: 8px 12px;
-    min-width: 160px;
-}
-
-/* Download buttons */
-.download-buttons {
-    display: flex;
-    gap: 10px;
-}
-
-/* Table hover effect */
-table tbody tr {
-    transition: background 0.25s ease;
-}
-
-table tbody tr:hover {
-    background: rgba(255, 255, 255, 0.06);
-}
-
-/* Resume link */
-table a {
-    color: #60a5fa;
-    text-decoration: none;
-    font-weight: 500;
-}
-
-table a:hover {
-    text-decoration: underline;
-}
-</style>
 
 {% endblock %}
