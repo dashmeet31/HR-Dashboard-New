@@ -8,6 +8,7 @@ import psycopg2.extras
 from psycopg2 import pool
 from dotenv import load_dotenv
 from flask import send_from_directory
+from werkzeug.security import generate_password_hash, check_password_hash
 
 load_dotenv()
 
@@ -69,6 +70,19 @@ def login():
         password = request.form["password"]
 
         conn, cur = get_db(True)
+
+        #  First check: users table (secure auth)
+        cur.execute("SELECT * FROM users WHERE email=%s", (email,))
+        user = cur.fetchone()
+
+        if user and check_password_hash(user["password"], password):
+            session.clear()
+            session["hr_logged_in"] = True
+            session["user_email"] = user["email"]
+            release_db(conn, cur)
+            return redirect("/dashboard")
+
+        # Fallback: old admin login (no breaking)
         cur.execute("SELECT * FROM admins WHERE email=%s", (email,))
         admin = cur.fetchone()
         release_db(conn, cur)
@@ -273,15 +287,35 @@ def settings():
             message = "Passwords do not match"
         else:
             conn, cur = get_db(True)
-            cur.execute("SELECT * FROM admins LIMIT 1")
-            admin = cur.fetchone()
 
-            if admin and admin["password"] == old:
-                cur.execute("UPDATE admins SET password=%s", (new,))
-                conn.commit()
-                message = "Password updated successfully"
+            #  FIRST: check users table (secure users)
+            cur.execute("SELECT * FROM users WHERE email=%s", (session.get("user_email"),))
+            user = cur.fetchone()
+
+            if user:
+                # verify old password (hashed)
+                if check_password_hash(user["password"], old):
+                    new_hash = generate_password_hash(new)
+                    cur.execute(
+                        "UPDATE users SET password=%s WHERE email=%s",
+                        (new_hash, user["email"])
+                    )
+                    conn.commit()
+                    message = "Password updated successfully"
+                else:
+                    message = "Old password incorrect"
+
             else:
-                message = "Old password incorrect"
+                #  FALLBACK: old admin logic (no breaking)
+                cur.execute("SELECT * FROM admins LIMIT 1")
+                admin = cur.fetchone()
+
+                if admin and admin["password"] == old:
+                    cur.execute("UPDATE admins SET password=%s", (new,))
+                    conn.commit()
+                    message = "Password updated successfully"
+                else:
+                    message = "Old password incorrect"
 
             release_db(conn, cur)
 
