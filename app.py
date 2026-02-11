@@ -36,14 +36,23 @@ def login():
         email = request.form["email"]
         password = request.form["password"]
 
-        # TEMP LOGIN (Supabase me users table nahi hai abhi)
-        if email == "admin@hr.com" and password == "admin":
+        try:
+            user = supabase.auth.sign_in_with_password({
+                "email": email,
+                "password": password
+            })
+
             session["hr_logged_in"] = True
+            session["user_email"] = email
+
             return redirect("/dashboard")
 
-        return "Invalid Login", 401
+        except Exception as e:
+            return "Invalid Login"
 
     return render_template("login.html")
+
+
 
 @app.route("/logout")
 def logout():
